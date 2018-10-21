@@ -10,6 +10,19 @@
 #pragma config BOREN = SBORDIS
 #pragma config WDTE = OFF
 
+#define COMPOSITE_SYNC_TRIS TRISB0
+#define COMPOSITE_SYNC_LAT LATB0
+
+#define VIDEO_DATA_TRIS TRISB1
+#define VIDEO_DATA_LAT LATB1
+#define VIDEO_DATA_PPS RB1PPS
+
+#define HORIZONTAL_SYNC_TRIS TRISB2 
+#define HORIZONTAL_SYNC_LAT LATB2
+
+#define VERTICAL_SYNC_TRIS TRISB3
+#define VERTICAL_SYNC_LAT LATB3
+
 #define NOP_10 Nop(); Nop(); Nop(); Nop(); Nop(); Nop(); Nop(); Nop(); Nop(); Nop()
 
 #define VIDEO_FORMAT_NTSC 0
@@ -29,7 +42,7 @@
 #define VIDEO_BUFFER_HEIGHT 240
 
 // Video format to output.
-uint8_t videoFormat = VIDEO_FORMAT_VGA;
+uint8_t videoFormat = VIDEO_FORMAT_NTSC;
 // Pixels to display on the monitor.
 uint8_t videoData[VIDEO_BUFFER_WIDTH * VIDEO_BUFFER_HEIGHT];
 // Number of "half line" intervals since the beginning of field 1.
@@ -114,7 +127,7 @@ void testVideo() {
     PPSLOCK = 0xAA;
     PPSLOCKbits.PPSLOCKED = 0x00;
 
-    RC5PPS = 0x1F; // Set up SDO.
+    VIDEO_DATA_PPS = 0x1F; // Set up SDO.
     
     // Enable peripheral pin select lock.
     PPSLOCK = 0x55;
@@ -342,11 +355,11 @@ void __interrupt(high_priority, irq(31)) serviceInterrupt(void) {
     
     if (videoFormat == VIDEO_FORMAT_VGA) {
         // Horizontal sync pulse. (3.8 microseconds)
-        LATC6 = 0;
+        HORIZONTAL_SYNC_LAT = 0;
         NOP_10; NOP_10; NOP_10; NOP_10;
         Nop(); Nop(); Nop(); Nop();
-        LATC6 = 1;
-        LATC7 = nextVgaVerticalSyncValue;
+        HORIZONTAL_SYNC_LAT = 1;
+        VERTICAL_SYNC_LAT = nextVgaVerticalSyncValue;
         
         // Back porch. (1.9 microseconds)
         NOP_10;
@@ -367,7 +380,7 @@ void __interrupt(high_priority, irq(31)) serviceInterrupt(void) {
         } else {
             // All of the other pulse types begin with 0 volts.
             // We want them to begin with consistent timing.
-            LATC2 = 0;
+            COMPOSITE_SYNC_LAT = 0;
             
             if (nextNtscPulseType == NTSC_PULSE_TYPE_EQUALIZING) {
                 
@@ -375,7 +388,7 @@ void __interrupt(high_priority, irq(31)) serviceInterrupt(void) {
                 NOP_10;
                 Nop(); Nop(); Nop(); Nop(); Nop();
                 Nop();
-                LATC2 = 1;
+                COMPOSITE_SYNC_LAT = 1;
                 
                 advanceNtscProgress();
                 
@@ -385,7 +398,7 @@ void __interrupt(high_priority, irq(31)) serviceInterrupt(void) {
                 NOP_10; NOP_10; NOP_10;
                 Nop(); Nop(); Nop(); Nop(); Nop();
                 Nop(); Nop(); Nop(); Nop();
-                LATC2 = 1;
+                COMPOSITE_SYNC_LAT = 1;
                 
                 // Back porch. (4.7 microseconds again)
                 delayFast(1);
@@ -407,7 +420,7 @@ void __interrupt(high_priority, irq(31)) serviceInterrupt(void) {
                 delayFast(18);
                 NOP_10;
                 Nop(); Nop(); Nop();
-                LATC2 = 1;
+                COMPOSITE_SYNC_LAT = 1;
                 
                 // We don't have a lot of time to advance progress after the pulse,
                 // so we have to do it really fast.
@@ -424,26 +437,17 @@ void __interrupt(high_priority, irq(31)) serviceInterrupt(void) {
 }
 
 int main() {
-    // Test LED.
-    TRISC0 = 0;
-    // Composite video syncing pulses.
-    TRISC2 = 0;
-    // Video data.
-    TRISC5 = 0;
-    // Horizontal VGA syncing pulses.
-    TRISC6 = 0;
-    // Vertical VGA syncing pulses.
-    TRISC7 = 0;
-    LATC0 = 0;
-    LATC2 = 0;
-    LATC5 = 0;
-    LATC6 = 0;
-    LATC7 = 0;
-    delayMs(1000);
     
-    LATC0 = 1;
-    delayMs(1000);
-    LATC0 = 0;
+    COMPOSITE_SYNC_TRIS = 0;
+    VIDEO_DATA_TRIS = 0;
+    HORIZONTAL_SYNC_TRIS = 0;
+    VERTICAL_SYNC_TRIS = 0;
+    
+    COMPOSITE_SYNC_LAT = 0;
+    VIDEO_DATA_LAT = 0;
+    HORIZONTAL_SYNC_LAT = 0;
+    VERTICAL_SYNC_LAT = 0;
+    
     delayMs(1000);
     
     testVideo();
