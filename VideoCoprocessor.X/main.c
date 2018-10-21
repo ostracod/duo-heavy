@@ -23,10 +23,25 @@
 #define VERTICAL_SYNC_TRIS TRISB3
 #define VERTICAL_SYNC_LAT LATB3
 
+#define VIDEO_BUTTON_ANSEL ANSELBbits.ANSELB5
+#define VIDEO_BUTTON_TRIS TRISB5
+#define VIDEO_BUTTON_PORT PORTBbits.RB5
+
+#define VGA_LED_TRIS TRISA0
+#define VGA_LED_LAT LATA0
+
+#define PAL_LED_TRIS TRISA1
+#define PAL_LED_LAT LATA1
+
+#define NTSC_LED_TRIS TRISA2
+#define NTSC_LED_LAT LATA2
+
 #define NOP_10 Nop(); Nop(); Nop(); Nop(); Nop(); Nop(); Nop(); Nop(); Nop(); Nop()
 
-#define VIDEO_FORMAT_NTSC 0
+#define VIDEO_FORMAT_NONE 0
 #define VIDEO_FORMAT_VGA 1
+#define VIDEO_FORMAT_PAL 2
+#define VIDEO_FORMAT_NTSC 3
 
 // 31.8 microseconds.
 #define INITIAL_NTSC_TIMER_VALUE ((uint32_t)190)
@@ -47,20 +62,22 @@ uint8_t videoFormat = VIDEO_FORMAT_NTSC;
 uint8_t videoData[VIDEO_BUFFER_WIDTH * VIDEO_BUFFER_HEIGHT];
 // Number of "half line" intervals since the beginning of field 1.
 // Field 1 begins with pre-equalizing pulses.
-uint16_t ntscProgress = 0;
+uint16_t ntscProgress;
 // Type of pulse to output during the next interrupt.
-uint8_t nextNtscPulseType = NTSC_PULSE_TYPE_NONE;
+uint8_t nextNtscPulseType;
 // Number of remaining long pulses to output.
-uint8_t remainingNtscLongPulseCount = 0;
+uint8_t remainingNtscLongPulseCount;
 // VGA line number to output.
 // This includes lines above and below the visible area.
-uint16_t vgaLineNumber = 0;
+uint16_t vgaLineNumber;
 // Value VSYNC should adopt during the next interrupt.
-uint8_t nextVgaVerticalSyncValue = 0;
+uint8_t nextVgaVerticalSyncValue;
 // Boolean indicating whether to start dumping pixels during the next interrupt.
-uint8_t nextShouldDumpVideoData = 0;
+uint8_t nextShouldDumpVideoData;
 // Index of pixels to display during the next interrupt.
-uint16_t nextVideoDataIndex = 0;
+uint16_t nextVideoDataIndex;
+
+uint8_t hasReleasedVideoButton = 0;
 
 void delayMs(uint32_t milliseconds) {
     uint32_t index = milliseconds * 640;
@@ -120,19 +137,24 @@ void drawTestRectangle(
     }
 }
 
-void testVideo() {
+void configureVideo() {
     
-    // Disable peripheral pin select lock.
-    PPSLOCK = 0x55;
-    PPSLOCK = 0xAA;
-    PPSLOCKbits.PPSLOCKED = 0x00;
-
-    VIDEO_DATA_PPS = 0x1F; // Set up SDO.
+    TMR0IE = 0; // Disable timer interrupts.
+    GIE = 0; // Disable global interrupts.
+    T0CON0bits.EN = 0; // Disable the timer.
+    SPI1CON0 = 0x03; // Disable SPI.
     
-    // Enable peripheral pin select lock.
-    PPSLOCK = 0x55;
-    PPSLOCK = 0xAA;
-    PPSLOCKbits.PPSLOCKED = 0x01;
+    VGA_LED_LAT = (videoFormat != VIDEO_FORMAT_VGA);
+    PAL_LED_LAT = (videoFormat != VIDEO_FORMAT_PAL);
+    NTSC_LED_LAT = (videoFormat != VIDEO_FORMAT_NTSC);
+    
+    ntscProgress = 0;
+    nextNtscPulseType = NTSC_PULSE_TYPE_NONE;
+    remainingNtscLongPulseCount = 0;
+    vgaLineNumber = 0;
+    nextVgaVerticalSyncValue = 0;
+    nextShouldDumpVideoData = 0;
+    nextVideoDataIndex = 0;
     
     SPI1CON1 = 0x00;
     SPI1CON2 = 0x02;
@@ -144,54 +166,6 @@ void testVideo() {
     SPI1CLK = 0x00;
     
     SPI1CON0 = 0x83; // Enable SPI.
-    
-    // Disable priority lock.
-    PRLOCK = 0x55;
-    PRLOCK = 0xAA;
-    PRLOCKbits.PRLOCKED = 0;
-    
-    // Prioritize DMA over everything else.
-    DMA1PR = 0;
-    ISRPR = 1;
-    MAINPR = 2;
-    
-    // Enable priority lock.
-    PRLOCK = 0x55;
-    PRLOCK = 0xAA;
-    PRLOCKbits.PRLOCKED = 1;
-    
-    uint16_t posY = 0;
-    while (posY < 240) {
-        uint16_t posX = 0;
-        while (posX < VIDEO_BUFFER_WIDTH) {
-            uint16_t index = posX + posY * VIDEO_BUFFER_WIDTH;
-            videoData[index] = 0;
-            //if (posX < VIDEO_BUFFER_WIDTH - 1) {
-                //videoData[index] = posY;
-            //} else {
-                //videoData[index] = 0;
-            //}
-            posX += 1;
-        }
-        posY += 1;
-    }
-    
-    DMA1DSA = (uint32_t)(&SPI1TXB); // Set DMA destination pointer.
-    
-    DMA1CON1bits.SMR = 0; // Read from GPR.
-    DMA1CON1bits.SMODE = 1; // Increment after access.
-    DMA1CON1bits.DMODE = 0; // Do not change after access.
-    
-    // Set DMA data size.
-    DMA1SSZ = VIDEO_BUFFER_WIDTH;
-    DMA1DSZ = 1;
-    
-    DMA1CON1bits.SSTP = 1; // Stop DMA after reload.
-    DMA1CON1bits.DSTP = 0; // Continue DMA after reload.
-    
-    DMA1SIRQ = 21; // DMA start interrupt is SPI.
-    
-    DMA1CON0bits.EN = 1; // Enable DMA.
     
     // Use an 8 bit timer.
     T0CON0bits.MD16 = 0;
@@ -211,8 +185,9 @@ void testVideo() {
     TMR0IE = 1; // Enable timer interrupts.
     GIE = 1; // Enable global interrupts.
     T0CON0bits.EN = 1; // Enable the timer.
-    
-    // Some code to test graphics.
+}
+
+void testVideo() {
     
     float angle = 0;
     float radius = 0;
@@ -286,10 +261,32 @@ void testVideo() {
     */
 }
 
+void checkVideoButton() {
+    if (VIDEO_BUTTON_PORT) {
+        hasReleasedVideoButton = 1;
+        return;
+    }
+    if (!hasReleasedVideoButton) {
+        return;
+    }
+    hasReleasedVideoButton = 0;
+    if (videoFormat == VIDEO_FORMAT_VGA) {
+        videoFormat = VIDEO_FORMAT_PAL;
+    } else if (videoFormat == VIDEO_FORMAT_PAL) {
+        videoFormat = VIDEO_FORMAT_NTSC;
+    } else if (videoFormat == VIDEO_FORMAT_NTSC) {
+        videoFormat = VIDEO_FORMAT_NONE;
+    } else {
+        videoFormat = VIDEO_FORMAT_VGA;
+    }
+    configureVideo();
+}
+
 void advanceNtscProgress() {
     ntscProgress += 1;
     if (ntscProgress >= 1050) {
         ntscProgress = 0;
+        checkVideoButton();
     }
     uint8_t tempFieldNumber;
     uint16_t tempFieldProgress;
@@ -323,6 +320,7 @@ void advanceVgaProgress() {
     vgaLineNumber += 1;
     if (vgaLineNumber >= 525) {
         vgaLineNumber = 0;
+        checkVideoButton();
     }
     if (vgaLineNumber < 2) {
         nextVgaVerticalSyncValue = 0;
@@ -431,6 +429,8 @@ void __interrupt(high_priority, irq(31)) serviceInterrupt(void) {
                 }
             }
         }
+    } else {
+        checkVideoButton();
     }
     
     TMR0IF = 0;
@@ -438,22 +438,95 @@ void __interrupt(high_priority, irq(31)) serviceInterrupt(void) {
 
 int main() {
     
+    delayMs(100); // Let everything stabilize a little.
+    
+    // Disable ADC.
+    ADCON0bits.ADON = 0;
+    CM1CON0bits.C1EN = 0;
+    CM2CON0bits.C2EN = 0;
+    VIDEO_BUTTON_ANSEL = 0;
+    
     COMPOSITE_SYNC_TRIS = 0;
     VIDEO_DATA_TRIS = 0;
     HORIZONTAL_SYNC_TRIS = 0;
     VERTICAL_SYNC_TRIS = 0;
+    
+    VIDEO_BUTTON_TRIS = 1;
+    VGA_LED_TRIS = 0;
+    PAL_LED_TRIS = 0;
+    NTSC_LED_TRIS = 0;
     
     COMPOSITE_SYNC_LAT = 0;
     VIDEO_DATA_LAT = 0;
     HORIZONTAL_SYNC_LAT = 0;
     VERTICAL_SYNC_LAT = 0;
     
-    delayMs(1000);
+    VGA_LED_LAT = 1;
+    PAL_LED_LAT = 1;
+    NTSC_LED_LAT = 1;
+    
+    // Disable peripheral pin select lock.
+    PPSLOCK = 0x55;
+    PPSLOCK = 0xAA;
+    PPSLOCKbits.PPSLOCKED = 0x00;
+    
+    VIDEO_DATA_PPS = 0x1F; // Set up SDO.
+    
+    // Enable peripheral pin select lock.
+    PPSLOCK = 0x55;
+    PPSLOCK = 0xAA;
+    PPSLOCKbits.PPSLOCKED = 0x01;
+    
+    // Disable priority lock.
+    PRLOCK = 0x55;
+    PRLOCK = 0xAA;
+    PRLOCKbits.PRLOCKED = 0;
+    
+    // Prioritize DMA over everything else.
+    DMA1PR = 0;
+    ISRPR = 1;
+    MAINPR = 2;
+    
+    // Enable priority lock.
+    PRLOCK = 0x55;
+    PRLOCK = 0xAA;
+    PRLOCKbits.PRLOCKED = 1;
+    
+    DMA1DSA = (uint32_t)(&SPI1TXB); // Set DMA destination pointer.
+    
+    DMA1CON1bits.SMR = 0; // Read from GPR.
+    DMA1CON1bits.SMODE = 1; // Increment after access.
+    DMA1CON1bits.DMODE = 0; // Do not change after access.
+    
+    // Set DMA data size.
+    DMA1SSZ = VIDEO_BUFFER_WIDTH;
+    DMA1DSZ = 1;
+    
+    DMA1CON1bits.SSTP = 1; // Stop DMA after reload.
+    DMA1CON1bits.DSTP = 0; // Continue DMA after reload.
+    
+    DMA1SIRQ = 21; // DMA start interrupt is SPI.
+    
+    DMA1CON0bits.EN = 1; // Enable DMA.
+    
+    // Clear the video buffer.
+    uint16_t posY = 0;
+    while (posY < 240) {
+        uint16_t posX = 0;
+        while (posX < VIDEO_BUFFER_WIDTH) {
+            uint16_t index = posX + posY * VIDEO_BUFFER_WIDTH;
+            videoData[index] = 0;
+            posX += 1;
+        }
+        posY += 1;
+    }
+    
+    configureVideo();
     
     testVideo();
     
     while (1) {
-        delayMs(250);
+        delayMs(10);
     }
     return 0;
 }
