@@ -3,7 +3,8 @@
 
 #include <stdint.h>
 #include <xc.h>
-#include <math.h>
+#include "font.h"
+#include "main.h"
 
 #pragma config FEXTOSC = HS
 #pragma config RSTOSC = EXTOSC_4PLL
@@ -53,13 +54,8 @@
 #define NTSC_PULSE_TYPE_EQUALIZING 2
 #define NTSC_PULSE_TYPE_LONG 3
 
-#define VIDEO_BUFFER_WIDTH ((240 / 8) + 1)
-#define VIDEO_BUFFER_HEIGHT 240
-
 // Video format to output.
 uint8_t videoFormat = VIDEO_FORMAT_NTSC;
-// Pixels to display on the monitor.
-uint8_t videoData[VIDEO_BUFFER_WIDTH * VIDEO_BUFFER_HEIGHT];
 // Number of "half line" intervals since the beginning of field 1.
 // Field 1 begins with pre-equalizing pulses.
 uint16_t ntscProgress;
@@ -188,77 +184,9 @@ void configureVideo() {
 }
 
 void testVideo() {
-    
-    float angle = 0;
-    float radius = 0;
-    while (radius < 100) {
-        uint16_t tempPosX = (uint16_t)(120 + cos(angle) * radius);
-        uint16_t tempPosY = (uint16_t)(120 + sin(angle) * radius);
-        drawSinglePixel(tempPosX + 0, tempPosY + 0, 1);
-        drawSinglePixel(tempPosX + 1, tempPosY + 0, 1);
-        drawSinglePixel(tempPosX + 2, tempPosY + 0, 1);
-        drawSinglePixel(tempPosX + 0, tempPosY + 1, 1);
-        drawSinglePixel(tempPosX + 1, tempPosY + 1, 1);
-        drawSinglePixel(tempPosX + 2, tempPosY + 1, 1);
-        drawSinglePixel(tempPosX + 0, tempPosY + 2, 1);
-        drawSinglePixel(tempPosX + 1, tempPosY + 2, 1);
-        drawSinglePixel(tempPosX + 2, tempPosY + 2, 1);
-        angle += 0.015;
-        radius += 0.025;
-    }
-    
-    /*
-    while (1) {
-        uint16_t posX = 0;
-        while (posX < VIDEO_BUFFER_WIDTH - 1) {
-            videoData[posX] = 0;
-            posX += 1;
-        }
-        uint8_t tempCount = 0;
-        while (tempCount < 3) {
-            uint8_t posX = (uint8_t)((uint16_t)rand() % (uint16_t)238);
-            drawSinglePixel(posX + 1, 0, 1);
-            drawSinglePixel(posX, 1, 1);
-            drawSinglePixel(posX + 2, 1, 1);
-            drawSinglePixel(posX + 1, 2, 1);
-            tempCount += 1;
-        }
-        uint16_t posY = 239;
-        while (posY > 0) {
-            uint16_t tempIndex1 = posY * VIDEO_BUFFER_WIDTH;
-            uint16_t tempIndex2 = (posY - 1) * VIDEO_BUFFER_WIDTH;
-            uint16_t posX = 0;
-            while (posX < VIDEO_BUFFER_WIDTH - 1) {
-                videoData[tempIndex1] = videoData[tempIndex2];
-                tempIndex1 += 1;
-                tempIndex2 += 1;
-                posX += 1;
-            }
-            posY -= 1;
-        }
-    }
-    */
-    
-    /*
-    while (1) {
-        uint8_t width = 10 + (uint8_t)((uint16_t)rand() % (uint16_t)50);
-        uint8_t height = 10 + (uint8_t)((uint16_t)rand() % (uint16_t)50);
-        uint8_t posX = (uint8_t)((uint16_t)rand() % (uint16_t)(240 - width));
-        uint8_t posY = (uint8_t)((uint16_t)rand() % (uint16_t)(240 - height));
-        uint8_t fillColor = (uint8_t)rand() % (uint8_t)3;
-        uint8_t borderColor;
-        if (fillColor == 0) {
-            borderColor = 1;
-        }
-        if (fillColor == 1) {
-            borderColor = 0;
-        }
-        if (fillColor == 2) {
-            borderColor = (uint8_t)rand() % (uint8_t)2;
-        }
-        drawTestRectangle(posX, posY, width, height, fillColor, borderColor);
-    }
-    */
+    drawCharacter(0, 0);
+    drawCharacter(3, 1);
+    drawCharacter(6, 2);
 }
 
 void checkVideoButton() {
