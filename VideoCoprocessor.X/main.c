@@ -183,10 +183,30 @@ void configureVideo() {
     T0CON0bits.EN = 1; // Enable the timer.
 }
 
+const uint8_t demoText[] = "the quick brown fox jumps\nover the lazy dog.\n\nThe Quick Brown Fox Jumps\nOver The Lazy Dog.\n\nTHE QUICK BROWN FOX JUMPS\nOVER THE LAZY DOG!!!";
+
 void testVideo() {
-    drawCharacter(0, 0);
-    drawCharacter(3, 1);
-    drawCharacter(6, 2);
+    uint8_t tempCharacter = '!';
+    while (tempCharacter <= '~') {
+        drawCharacter((tempCharacter % 16) * 7, 10 + (tempCharacter / 16) * 9, tempCharacter);
+        tempCharacter += 1;
+    }
+    uint8_t tempPosX = 0;
+    uint8_t tempPosY = 100;
+    uint16_t index = 0;
+    while (1) {
+        uint8_t tempCharacter = demoText[index];
+        if (tempCharacter == 0) {
+            break;
+        } else if (tempCharacter == '\n') {
+            tempPosX = 0;
+            tempPosY += 9;
+        } else {
+            drawCharacter(tempPosX, tempPosY, tempCharacter);
+            tempPosX += 7;
+        }
+        index += 1;
+    }
 }
 
 void checkVideoButton() {
