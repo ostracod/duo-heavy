@@ -125,24 +125,78 @@ int main() {
     
     sendDumbTerminalCharacter(128); // Clear the display.
     
+    sendDumbTerminalCharacter('F');
+    sendDumbTerminalCharacter('\n');
+    uint8_t tempDelay;
+    tempDelay = 3;
+    while (tempDelay > 0) {
+        sendDumbTerminalNumber(tempDelay);
+        delayMs(1000);
+        tempDelay -= 1;
+    }
+    
+    uint8_t tempChipNumber;
+    uint32_t tempAddressMask;
     uint32_t tempAddress;
     uint8_t tempCount;
     
-    tempAddress = 1;
-    tempCount = 0;
-    while (tempCount <= 18) {
-        writeMemory(tempAddress, (tempCount + 1) * 5);
-        tempAddress <<= 1;
-        tempCount += 1;
+    /*
+    tempChipNumber = 1;
+    tempAddressMask = 0x00080000;
+    while (tempChipNumber <= 3) {
+        
+        sendDumbTerminalNumber(tempChipNumber);
+        // Erase the whole flash chip.
+        writeMemory(0x00005555 | tempAddressMask, 0xAA);
+        writeMemory(0x00002AAA | tempAddressMask, 0x55);
+        writeMemory(0x00005555 | tempAddressMask, 0x80);
+        writeMemory(0x00005555 | tempAddressMask, 0xAA);
+        writeMemory(0x00002AAA | tempAddressMask, 0x55);
+        writeMemory(0x00005555 | tempAddressMask, 0x10);
+        delayMs(200);
+        
+        tempAddress = 1;
+        tempCount = 0;
+        while (tempCount <= 18) {
+            // Program a byte.
+            writeMemory(0x00005555 | tempAddressMask, 0xAA);
+            writeMemory(0x00002AAA | tempAddressMask, 0x55);
+            writeMemory(0x00005555 | tempAddressMask, 0xA0);
+            writeMemory(tempAddress | tempAddressMask, (tempCount + 1) * 5 + tempChipNumber);
+            delayMs(1);
+            tempAddress <<= 1;
+            tempCount += 1;
+        }
+        
+        tempChipNumber += 1;
+        tempAddressMask += 0x00080000;
     }
+    */
     
-    tempAddress = 1;
-    tempCount = 0;
-    while (tempCount <= 18) {
-        uint8_t tempValue = readMemory(tempAddress);
-        sendDumbTerminalNumber(tempValue);
-        tempAddress <<= 1;
-        tempCount += 1;
+    tempChipNumber = 1;
+    tempAddressMask = 0x00080000;
+    while (tempChipNumber <= 3) {
+        
+        sendDumbTerminalCharacter('\n');
+        sendDumbTerminalNumber(tempChipNumber);
+        
+        tempAddress = 1;
+        tempCount = 0;
+        while (tempCount <= 18) {
+            uint8_t tempValue = readMemory(tempAddress | tempAddressMask);
+            sendDumbTerminalNumber(tempValue);
+            tempAddress <<= 1;
+            tempCount += 1;
+        }
+        
+        tempDelay = 12;
+        while (tempDelay > 0) {
+            delayMs(1000);
+            tempDelay -= 1;
+        }
+        
+        tempChipNumber += 1;
+        tempAddressMask += 0x00080000;
     }
     
     while (1) {
