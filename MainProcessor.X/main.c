@@ -35,6 +35,22 @@
 #define MEMORY_WE_TRIS TRISE2
 #define MEMORY_WE_LAT LATE2
 
+#define KEYBOARD_CLOCK_ANSEL ANSELCbits.ANSELC6
+#define KEYBOARD_CLOCK_TRIS TRISC6
+#define KEYBOARD_CLOCK_PORT PORTCbits.RC6
+#define KEYBOARD_CLOCK_IOC IOCCNbits.IOCCN6
+#define KEYBOARD_CLOCK_IOC_FLAG IOCCFbits.IOCCF6
+
+#define KEYBOARD_DATA_ANSEL ANSELCbits.ANSELC5
+#define KEYBOARD_DATA_TRIS TRISC5
+#define KEYBOARD_DATA_PORT PORTCbits.RC5
+
+uint8_t registeredKeyBuffer[10];
+uint8_t registeredKeyInputIndex = 0;
+uint8_t registeredKeyOutputIndex = 0;
+uint8_t pendingKey = 0;
+uint8_t keyboardBitCount = 0;
+
 void delayMs(uint32_t milliseconds) {
     uint32_t index = milliseconds * 850;
     while (index > 0) {
@@ -94,6 +110,42 @@ void writeMemory(uint32_t address, uint8_t data) {
     MEMORY_WE_LAT = 1;
 }
 
+uint8_t digestRegisteredKey() {
+    if (registeredKeyOutputIndex == registeredKeyInputIndex) {
+        return 0;
+    }
+    uint8_t output = registeredKeyBuffer[registeredKeyOutputIndex];
+    registeredKeyOutputIndex += 1;
+    if (registeredKeyOutputIndex > sizeof(registeredKeyBuffer)) {
+        registeredKeyOutputIndex = 0;
+    }
+    return output;
+}
+
+// Service IOC interrupts.
+void __interrupt(high_priority, irq(7)) serviceKeyboardInterrupt(void) {
+    
+    uint8_t tempBit = KEYBOARD_DATA_PORT;
+    if (keyboardBitCount >= 1 && keyboardBitCount <= 8) {
+        if (tempBit) {
+            pendingKey |= 0x80;
+        }
+        pendingKey >>= 1;
+    }
+    keyboardBitCount += 1;
+    if (keyboardBitCount == 11) {
+        keyboardBitCount = 0;
+        registeredKeyBuffer[registeredKeyInputIndex] = pendingKey;
+        registeredKeyInputIndex += 1;
+        if (registeredKeyInputIndex >= sizeof(registeredKeyBuffer)) {
+            registeredKeyInputIndex = 0;
+        }
+        pendingKey = 0;
+    }
+    
+    KEYBOARD_CLOCK_IOC_FLAG = 0;
+}
+
 int main() {
     
     delayMs(100); // Let everything stabilize a little.
@@ -104,6 +156,8 @@ int main() {
     CM2CON0bits.C2EN = 0;
     DATA_BUS_ANSEL = 0x00;
     HOST_CLOCK_ANSEL = 0;
+    KEYBOARD_CLOCK_ANSEL = 0;
+    KEYBOARD_DATA_ANSEL = 0;
     
     ADDRESS_BUS_0_LAT = 0x00;
     ADDRESS_BUS_1_LAT = 0x00;
@@ -122,85 +176,27 @@ int main() {
     DEVICE_CLOCK_TRIS = 0;
     MEMORY_OE_TRIS = 0;
     MEMORY_WE_TRIS = 0;
+    KEYBOARD_CLOCK_TRIS = 1;
+    KEYBOARD_DATA_TRIS = 1;
+    
+    KEYBOARD_CLOCK_IOC = 1; // Use negative-edge IOC.
+    IOCIE = 1; // Enable IOC interrupts.
+    GIE = 1; // Enable global interrupts.
     
     sendDumbTerminalCharacter(128); // Clear the display.
     
-    sendDumbTerminalCharacter('F');
+    sendDumbTerminalCharacter('K');
     sendDumbTerminalCharacter('\n');
-    uint8_t tempDelay;
-    tempDelay = 3;
-    while (tempDelay > 0) {
-        sendDumbTerminalNumber(tempDelay);
-        delayMs(1000);
-        tempDelay -= 1;
-    }
-    
-    uint8_t tempChipNumber;
-    uint32_t tempAddressMask;
-    uint32_t tempAddress;
-    uint8_t tempCount;
-    
-    /*
-    tempChipNumber = 1;
-    tempAddressMask = 0x00080000;
-    while (tempChipNumber <= 3) {
-        
-        sendDumbTerminalNumber(tempChipNumber);
-        // Erase the whole flash chip.
-        writeMemory(0x00005555 | tempAddressMask, 0xAA);
-        writeMemory(0x00002AAA | tempAddressMask, 0x55);
-        writeMemory(0x00005555 | tempAddressMask, 0x80);
-        writeMemory(0x00005555 | tempAddressMask, 0xAA);
-        writeMemory(0x00002AAA | tempAddressMask, 0x55);
-        writeMemory(0x00005555 | tempAddressMask, 0x10);
-        delayMs(200);
-        
-        tempAddress = 1;
-        tempCount = 0;
-        while (tempCount <= 18) {
-            // Program a byte.
-            writeMemory(0x00005555 | tempAddressMask, 0xAA);
-            writeMemory(0x00002AAA | tempAddressMask, 0x55);
-            writeMemory(0x00005555 | tempAddressMask, 0xA0);
-            writeMemory(tempAddress | tempAddressMask, (tempCount + 1) * 5 + tempChipNumber);
-            delayMs(1);
-            tempAddress <<= 1;
-            tempCount += 1;
-        }
-        
-        tempChipNumber += 1;
-        tempAddressMask += 0x00080000;
-    }
-    */
-    
-    tempChipNumber = 1;
-    tempAddressMask = 0x00080000;
-    while (tempChipNumber <= 3) {
-        
-        sendDumbTerminalCharacter('\n');
-        sendDumbTerminalNumber(tempChipNumber);
-        
-        tempAddress = 1;
-        tempCount = 0;
-        while (tempCount <= 18) {
-            uint8_t tempValue = readMemory(tempAddress | tempAddressMask);
-            sendDumbTerminalNumber(tempValue);
-            tempAddress <<= 1;
-            tempCount += 1;
-        }
-        
-        tempDelay = 12;
-        while (tempDelay > 0) {
-            delayMs(1000);
-            tempDelay -= 1;
-        }
-        
-        tempChipNumber += 1;
-        tempAddressMask += 0x00080000;
-    }
     
     while (1) {
-        delayMs(10);
+        uint8_t tempKey;
+        while (1) {
+            tempKey = digestRegisteredKey();
+            if (tempKey) {
+                break;
+            }
+        }
+        sendDumbTerminalNumber(tempKey);
     }
     
     return 0;
