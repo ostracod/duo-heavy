@@ -37,6 +37,18 @@
 #define NTSC_LED_TRIS TRISA2
 #define NTSC_LED_LAT LATA2
 
+#define DATA_BUS_ANSEL ANSELC
+#define DATA_BUS_TRIS TRISC
+#define DATA_BUS_LAT LATC
+#define DATA_BUS_PORT PORTC
+
+#define DEVICE_CLOCK_ANSEL ANSELAbits.ANSELA4
+#define DEVICE_CLOCK_TRIS TRISA4
+#define DEVICE_CLOCK_PORT PORTAbits.RA4
+
+#define HOST_CLOCK_TRIS TRISA3
+#define HOST_CLOCK_LAT LATA3
+
 #define NOP_10 Nop(); Nop(); Nop(); Nop(); Nop(); Nop(); Nop(); Nop(); Nop(); Nop()
 
 #define VIDEO_FORMAT_NONE 0
@@ -74,6 +86,8 @@ uint8_t nextShouldDumpVideoData;
 uint16_t nextVideoDataIndex;
 
 uint8_t hasReleasedVideoButton = 0;
+
+uint8_t dumbTerminalPosX = 0;
 
 void delayMs(uint32_t milliseconds) {
     uint32_t index = milliseconds * 640;
@@ -133,6 +147,54 @@ void drawTestRectangle(
     }
 }
 
+void clearVideoData() {
+    uint16_t posY = 0;
+    while (posY < 240) {
+        uint16_t posX = 0;
+        while (posX < VIDEO_BUFFER_WIDTH) {
+            uint16_t index = posX + posY * VIDEO_BUFFER_WIDTH;
+            videoData[index] = 0;
+            posX += 1;
+        }
+        posY += 1;
+    }
+}
+
+void scrollVideoDataUp() {
+    uint16_t posY1 = 0;
+    uint16_t posY2 = 9;
+    while (posY2 < 240) {
+        uint16_t posX = 0;
+        while (posX < VIDEO_BUFFER_WIDTH) {
+            uint16_t index1 = posX + posY1 * VIDEO_BUFFER_WIDTH;
+            uint16_t index2 = posX + posY2 * VIDEO_BUFFER_WIDTH;
+            videoData[index1] = videoData[index2];
+            posX += 1;
+        }
+        posY1 += 1;
+        posY2 += 1;
+    }
+}
+
+void registerDumbTerminalCharacter(uint8_t character) {
+    if (character == '\n') {
+        dumbTerminalPosX = 0;
+        scrollVideoDataUp();
+        return;
+    }
+    if (character == 128) {
+        clearVideoData();
+        dumbTerminalPosX = 0;
+        return;
+    }
+    drawCharacter(dumbTerminalPosX, 200, character);
+    dumbTerminalPosX += 7;
+    if (dumbTerminalPosX > 230) {
+        dumbTerminalPosX = 0;
+        scrollVideoDataUp();
+    }
+}
+
 void configureVideo() {
     
     TMR0IE = 0; // Disable timer interrupts.
@@ -183,29 +245,27 @@ void configureVideo() {
     T0CON0bits.EN = 1; // Enable the timer.
 }
 
-const uint8_t demoText[] = "the quick brown fox jumps\nover the lazy dog.\n\nThe Quick Brown Fox Jumps\nOver The Lazy Dog.\n\nTHE QUICK BROWN FOX JUMPS\nOVER THE LAZY DOG!!!";
+uint8_t receiveHostByte() {
+    while (1) {
+        if (!DEVICE_CLOCK_PORT) {
+            break;
+        }
+    }
+    uint8_t output = DATA_BUS_PORT;
+    HOST_CLOCK_TRIS = 0;
+    while (1) {
+        if (DEVICE_CLOCK_PORT) {
+            break;
+        }
+    }
+    HOST_CLOCK_TRIS = 1;
+    return output;
+}
 
 void testVideo() {
-    uint8_t tempCharacter = '!';
-    while (tempCharacter <= '~') {
-        drawCharacter((tempCharacter % 16) * 7, 10 + (tempCharacter / 16) * 9, tempCharacter);
-        tempCharacter += 1;
-    }
-    uint8_t tempPosX = 0;
-    uint8_t tempPosY = 100;
-    uint16_t index = 0;
     while (1) {
-        uint8_t tempCharacter = demoText[index];
-        if (tempCharacter == 0) {
-            break;
-        } else if (tempCharacter == '\n') {
-            tempPosX = 0;
-            tempPosY += 9;
-        } else {
-            drawCharacter(tempPosX, tempPosY, tempCharacter);
-            tempPosX += 7;
-        }
-        index += 1;
+        uint8_t tempCharacter = receiveHostByte();
+        registerDumbTerminalCharacter(tempCharacter);
     }
 }
 
@@ -393,6 +453,19 @@ int main() {
     CM1CON0bits.C1EN = 0;
     CM2CON0bits.C2EN = 0;
     VIDEO_BUTTON_ANSEL = 0;
+    DATA_BUS_ANSEL = 0x00;
+    DEVICE_CLOCK_ANSEL = 0;
+    
+    COMPOSITE_SYNC_LAT = 0;
+    VIDEO_DATA_LAT = 0;
+    HORIZONTAL_SYNC_LAT = 0;
+    VERTICAL_SYNC_LAT = 0;
+    
+    VGA_LED_LAT = 1;
+    PAL_LED_LAT = 1;
+    NTSC_LED_LAT = 1;
+    
+    HOST_CLOCK_LAT = 0;
     
     COMPOSITE_SYNC_TRIS = 0;
     VIDEO_DATA_TRIS = 0;
@@ -404,14 +477,9 @@ int main() {
     PAL_LED_TRIS = 0;
     NTSC_LED_TRIS = 0;
     
-    COMPOSITE_SYNC_LAT = 0;
-    VIDEO_DATA_LAT = 0;
-    HORIZONTAL_SYNC_LAT = 0;
-    VERTICAL_SYNC_LAT = 0;
-    
-    VGA_LED_LAT = 1;
-    PAL_LED_LAT = 1;
-    NTSC_LED_LAT = 1;
+    DATA_BUS_TRIS = 0xFF;
+    DEVICE_CLOCK_TRIS = 1;
+    HOST_CLOCK_TRIS = 1;
     
     // Disable peripheral pin select lock.
     PPSLOCK = 0x55;
@@ -457,17 +525,7 @@ int main() {
     
     DMA1CON0bits.EN = 1; // Enable DMA.
     
-    // Clear the video buffer.
-    uint16_t posY = 0;
-    while (posY < 240) {
-        uint16_t posX = 0;
-        while (posX < VIDEO_BUFFER_WIDTH) {
-            uint16_t index = posX + posY * VIDEO_BUFFER_WIDTH;
-            videoData[index] = 0;
-            posX += 1;
-        }
-        posY += 1;
-    }
+    clearVideoData();
     
     configureVideo();
     
