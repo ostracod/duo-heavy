@@ -29,6 +29,12 @@
 #define DEVICE_CLOCK_TRIS TRISE1
 #define DEVICE_CLOCK_LAT LATE1
 
+#define MEMORY_OE_TRIS TRISC7
+#define MEMORY_OE_LAT LATC7
+
+#define MEMORY_WE_TRIS TRISE2
+#define MEMORY_WE_LAT LATE2
+
 void delayMs(uint32_t milliseconds) {
     uint32_t index = milliseconds * 850;
     while (index > 0) {
@@ -37,7 +43,10 @@ void delayMs(uint32_t milliseconds) {
 }
 
 void sendDumbTerminalCharacter(uint8_t character) {
+    ADDRESS_BUS_2_LAT = (ADDRESS_BUS_2_LAT & 0xE0) | 0x18;
+    DATA_BUS_TRIS = 0x00;
     DATA_BUS_LAT = character;
+    Nop(); Nop(); Nop(); Nop(); Nop();
     DEVICE_CLOCK_LAT = 0;
     while (1) {
         if (!HOST_CLOCK_PORT) {
@@ -50,6 +59,39 @@ void sendDumbTerminalCharacter(uint8_t character) {
             break;
         }
     }
+}
+
+void sendDumbTerminalNumber(uint8_t number) {
+    sendDumbTerminalCharacter('0' + (number / 100));
+    sendDumbTerminalCharacter('0' + ((number / 10) % 10));
+    sendDumbTerminalCharacter('0' + (number % 10));
+    sendDumbTerminalCharacter('\n');
+}
+
+void setMemoryAddress(uint32_t address) {
+    ADDRESS_BUS_0_LAT = address & 0x000000FF;
+    ADDRESS_BUS_1_LAT = (address & 0x0000FF00) >> 8;
+    ADDRESS_BUS_2_LAT = (ADDRESS_BUS_2_LAT & 0xE0) | ((address & 0x001F0000) >> 16);
+}
+
+uint8_t readMemory(uint32_t address) {
+    setMemoryAddress(address);
+    DATA_BUS_TRIS = 0xFF;
+    MEMORY_OE_LAT = 0;
+    Nop(); Nop(); Nop(); Nop(); Nop();
+    uint8_t output = DATA_BUS_PORT;
+    MEMORY_OE_LAT = 1;
+    return output;
+}
+
+void writeMemory(uint32_t address, uint8_t data) {
+    setMemoryAddress(address);
+    DATA_BUS_TRIS = 0x00;
+    DATA_BUS_LAT = data;
+    Nop(); Nop();
+    MEMORY_WE_LAT = 0;
+    Nop(); Nop(); Nop(); Nop(); Nop();
+    MEMORY_WE_LAT = 1;
 }
 
 int main() {
@@ -68,6 +110,8 @@ int main() {
     ADDRESS_BUS_2_LAT = (ADDRESS_BUS_2_LAT & 0xE0) | 0x18;
     
     DEVICE_CLOCK_LAT = 1;
+    MEMORY_OE_LAT = 1;
+    MEMORY_WE_LAT = 1;
     
     DATA_BUS_TRIS = 0x00;
     ADDRESS_BUS_0_TRIS = 0x00;
@@ -76,18 +120,33 @@ int main() {
     
     HOST_CLOCK_TRIS = 1;
     DEVICE_CLOCK_TRIS = 0;
+    MEMORY_OE_TRIS = 0;
+    MEMORY_WE_TRIS = 0;
     
     sendDumbTerminalCharacter(128); // Clear the display.
     
+    uint32_t tempAddress;
+    uint8_t tempCount;
+    
+    tempAddress = 1;
+    tempCount = 0;
+    while (tempCount <= 18) {
+        writeMemory(tempAddress, (tempCount + 1) * 5);
+        tempAddress <<= 1;
+        tempCount += 1;
+    }
+    
+    tempAddress = 1;
+    tempCount = 0;
+    while (tempCount <= 18) {
+        uint8_t tempValue = readMemory(tempAddress);
+        sendDumbTerminalNumber(tempValue);
+        tempAddress <<= 1;
+        tempCount += 1;
+    }
+    
     while (1) {
-        sendDumbTerminalCharacter('A');
-        delayMs(50);
-        sendDumbTerminalCharacter('B');
-        delayMs(50);
-        sendDumbTerminalCharacter('C');
-        delayMs(50);
-        sendDumbTerminalCharacter('D');
-        delayMs(50);
+        delayMs(10);
     }
     
     return 0;
