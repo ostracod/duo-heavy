@@ -146,6 +146,21 @@ void __interrupt(high_priority, irq(7)) serviceKeyboardInterrupt(void) {
     KEYBOARD_CLOCK_IOC_FLAG = 0;
 }
 
+uint16_t testTimerValue1 = 0;
+uint8_t testTimerValue2 = 0;
+
+// Service TIMER0 interrupts.
+void __interrupt(low_priority, irq(31)) serviceInterrupt(void) {
+    
+    testTimerValue1 += 1;
+    if (testTimerValue1 >= 1000) {
+        testTimerValue1 = 0;
+        testTimerValue2 += 1;
+    }
+    
+    TMR0IF = 0;
+}
+
 int main() {
     
     delayMs(100); // Let everything stabilize a little.
@@ -179,11 +194,28 @@ int main() {
     KEYBOARD_CLOCK_TRIS = 1;
     KEYBOARD_DATA_TRIS = 1;
     
+    // Use an 8 bit timer.
+    T0CON0bits.MD16 = 0;
+    // Use F_osc / 4. In our case, F_osc / 4 = 16 MHz.
+    T0CON1bits.CS = 2;
+    // Use scale of 1/1024.
+    T0CON1bits.CKPS = 10;
+    // Set timer period of about 1 ms.
+    TMR0H = 15;
+    // Reset timer counter.
+    TMR0L = 0;
+    
+    TMR0IE = 1; // Enable timer interrupts.
     KEYBOARD_CLOCK_IOC = 1; // Use negative-edge IOC.
     IOCIE = 1; // Enable IOC interrupts.
     GIE = 1; // Enable global interrupts.
+    T0CON0bits.EN = 1; // Enable the timer.
     
     sendDumbTerminalCharacter(128); // Clear the display.
+    
+    while (1) {
+        sendDumbTerminalNumber(testTimerValue2);
+    }
     
     sendDumbTerminalCharacter('K');
     sendDumbTerminalCharacter('\n');
